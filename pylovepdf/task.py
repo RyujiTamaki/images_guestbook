@@ -1,3 +1,4 @@
+import logging
 from pylovepdf.ilovepdf import ILovePdf
 from pylovepdf.file import File
 import re
@@ -17,7 +18,7 @@ class Task(ILovePdf):
         self.status = ''
         self.proxies = proxies
 
-        super(Task, self).__init__(public_key, proxies = self.proxies)
+        super(Task, self).__init__(public_key, proxies=self.proxies)
 
         self.begin = start
         self.file = None
@@ -26,9 +27,11 @@ class Task(ILovePdf):
         self.debug = False
         self.ignore_errors = True
         self.ignore_password = False
-        # {date} = current date {n} = file number {filename} = original filename {tool} = current processing tool
-        self.output_filename = '{filename}'
-        # {date} = current date {n} = file number {filename} = original filename {app} = current processing action
+        # {date} = current date {n} = file number
+        # {filename} = original filename {tool} = current processing tool
+        self.output_filename = '{filename}_{app}_{date}'
+        # {date} = current date {n} = file number
+        # {filename} = original filename {app} = current processing action
         self.packaged_filename = 'archive_{app}_{date}'
         self.file_encryption_key = None
         self.try_pdf_repair = True
@@ -45,23 +48,37 @@ class Task(ILovePdf):
 
         payload = {"public_key": self.public_key}
 
-        response = self._send_request('post', 'auth', payload, None, self.begin, proxies=self.proxies)
+        response = self._send_request(
+            method='post',
+            endpoint='auth',
+            payload=payload,
+            headers=None,
+            start=self.begin,
+            proxies=self.proxies
+        )
         self._set_token(response.token)
         self._set_headers()
 
     def start(self):
 
         headers = self.headers
-        response = self._send_request('get', 'start/' + self.tool, None, headers, self.begin, proxies=self.proxies)
+        response = self._send_request(
+            method='get',
+            endpoint='start/' + self.tool,
+            payload=None,
+            headers=headers,
+            start=self.begin,
+            proxies=self.proxies
+        )
         self._set_working_server(response.server)
 
         self.task = response.task
 
-    def add_file(self, file_path):
-
+    def add_file(self, file_data):
         self.file = File()
 
-        self.file.filename = file_path
+        self.file.file_data = file_data
+        self.file.filename = file_data.filename
         self.files.append(self.file)
 
     def upload(self):
@@ -69,11 +86,14 @@ class Task(ILovePdf):
         payload = {"task": self.task}
 
         for file in self.files:
-
-            with open(file.filename, 'rb') as f:
-                response = self._send_request('post', 'upload', payload=payload, headers=self.headers,
-                                              files={"file": f}, 
-                                              proxies=self.proxies)
+            response = self._send_request(
+                method='post',
+                endpoint='upload',
+                payload=payload,
+                headers=self.headers,
+                files=file.file_data,
+                proxies=self.proxies
+            )
 
             file.server_filename = response.server_filename
 
@@ -98,7 +118,8 @@ class Task(ILovePdf):
 
         """Builds a dictionary payload
 
-        It uses allowed properties from and object to build a payload dictionary.
+        It uses allowed properties from and object to build a payload
+        dictionary.
         Payload is a command to be sent to get ilovepdf.com working
         It is called inside tools
 
@@ -114,8 +135,10 @@ class Task(ILovePdf):
             if self.check_values(k, k + '_values'):
                 payload[k] = getattr(self, k)
             else:
-                raise ValueError("'%s' is not allowed in '%s' property valid values: (%s)"
-                                 % (getattr(self, k), k, getattr(self, k + '_values')))
+                raise ValueError(
+                    "'%s' is not allowed in '%s' property valid values: (%s)"
+                    % (getattr(self, k), k, getattr(self, k + '_values'))
+                )
 
         return payload
 
@@ -127,15 +150,22 @@ class Task(ILovePdf):
         :rtype: dict
         """
 
-        payload = {'task': self.task, 'tool': self.tool, 'ignore_errors': self.ignore_errors,
-                   'ignore_password': self.ignore_password, 'output_filename': self.output_filename,
-                   'packaged_filename': self.packaged_filename, 'try_pdf_repair': self.try_pdf_repair,
-                   'custom_string': self.custom_string, 'webhook': self.webhook}
+        payload = {
+            'task': self.task,
+            'tool': self.tool,
+            'ignore_errors': self.ignore_errors,
+            'ignore_password': self.ignore_password,
+            'output_filename': self.output_filename,
+            'packaged_filename': self.packaged_filename,
+            'try_pdf_repair': self.try_pdf_repair,
+            'custom_string': self.custom_string,
+            'webhook': self.webhook
+        }
 
         if self.debug:
             payload['debug'] = True
-            print("n of files: %s" % len(self.files))
-            print(self.files)
+            logging.info("n of files: %s" % len(self.files))
+            logging.info(self.files)
 
         i = 0
         # adding commands for each file filtering some file object properties
@@ -158,23 +188,29 @@ class Task(ILovePdf):
             i += 1
 
         if self.debug:
-            print("\nBuilt Payload: %s" % payload)
+            logging.info("\nBuilt Payload: %s" % payload)
 
         return payload
 
     def execute(self):
 
-        print('Uploading file...')
+        logging.info('Uploading file...')
         self.upload()
 
         payload = self.process()
 
-        response = self._send_request('post', 'process', payload, self.headers, proxies=self.proxies)
+        response = self._send_request(
+            method='post',
+            endpoint='process',
+            payload=payload,
+            headers=self.headers,
+            proxies=self.proxies
+        )
 
-        print("File uploaded! Below file stats:")
+        logging.info("File uploaded! Below file stats:")
         self.status = response.status
 
-        print(response)
+        logging.info(response)
 
     def set_output_folder(self, path):
 
@@ -182,41 +218,65 @@ class Task(ILovePdf):
 
     def check_task_status(self, printall=False):
 
-        response = self._send_request('get', 'task/%s' % self.task, None, self.headers, False,
-                                      None, stream=False, proxies=self.proxies)
+        response = self._send_request(
+            method='get',
+            endpoint='task/%s' % self.task,
+            payload=None,
+            headers=self.headers,
+            start=False,
+            files=None,
+            stream=False,
+            proxies=self.proxies
+        )
 
         if printall:
-            print(response)
+            logging.info(response)
         else:
             return response.status
+
+    def clean_filename(self, filename):
+
+        name = filename.split('_')
+        return name[len(name)-3] + '_' + name[len(name)-2] + '_' + name[len(name)-1]
 
     def download(self):
 
         if len(self.files) > 0 and not self.debug and self.status == 'TaskSuccess':
 
-            print('Downloading processed file...')
+            logging.info('Downloading processed file...')
 
-            response = self._send_request('get', 'download/%s' % self.task, None, self.headers, False,
-                                          None, stream=True, proxies=self.proxies)
+            response = self._send_request(
+                method='get',
+                endpoint='download/%s' % self.task,
+                payload=None,
+                headers=self.headers,
+                start=False,
+                files=None,
+                stream=True,
+                proxies=self.proxies
+            )
+
             # file_ext = str(response.headers['content-type']).split('/')
 
-            filename = re.search(r'(filename=\")(.+\.\w+)(\")', str(response.headers['content-disposition'])).group(2)
-            '''
-            with open(self.download_path + filename, 'wb') as f:
-                #for chunk in response.iter_content(10):
-                f.write(response)
-            '''
-            print('File downloaded!')
+            filename = self.clean_filename(
+                re.search(r'(filename=\")(.+\.\w+)(\")',
+                str(response.headers['content-disposition'])).group(2)
+            )
+
+            logging.info('File downloaded!')
 
             return response.content
 
         else:
-            print("no file to be downloaded")
+            logging.info("no file to be downloaded")
 
     def delete_current_task(self):
 
-        response = self._send_request('post', 'task/' + self.task, None, headers=self.headers, proxies=self.proxies)
-        print("Task delete %s" % response)
-
-
-
+        response = self._send_request(
+            method='post',
+            endpoint='task/' + self.task,
+            payload=None,
+            headers=self.headers,
+            proxies=self.proxies
+        )
+        logging.info("Task delete %s" % response)

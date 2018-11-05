@@ -21,7 +21,6 @@ class Request(object):
             return Response(response)
 
         if endpoint.startswith('start'):
-
             response = urlfetch.fetch(
                 url,
                 method=urlfetch.GET,
@@ -31,7 +30,13 @@ class Request(object):
             return Response(response)
 
         if endpoint == 'upload':
-            payload.update(files)
+            payload['file'] = MultipartParam(
+                'file',
+                filename=files.filename,
+                filesize=files.length,
+                filetype=files.type,
+                fileobj=files.file
+            )
             datagen, headers_gen = multipart_encode(payload)
             headers.update(headers_gen)
             response = urlfetch.fetch(
