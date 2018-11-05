@@ -20,6 +20,7 @@ For more information, see README.md.
 
 # [START all]
 
+import os
 import cgi
 import urllib
 
@@ -30,6 +31,18 @@ from google.appengine.api import users
 from google.appengine.ext import ndb
 
 import webapp2
+
+from pylovepdf.tools.pdftojpg import PdfToJpg
+
+
+def Pdf2Jpg(file_data):
+    public_key = os.environ.get("ILOVEPDF_PUBLIC_KEY")
+    task = PdfToJpg(public_key, verify_ssl=True)
+    task.add_file(file_data)
+    task.execute()
+    jpg = task.download()
+    task.delete_current_task()
+    return jpg
 
 
 # [START model]
@@ -119,6 +132,11 @@ class Guestbook(webapp2.RequestHandler):
         avatar = self.request.get('img')
         # [END sign_handler_1]
         # [START transform]
+        file_data = self.request.POST['img']
+
+        if file_data.type == 'application/pdf':
+            avatar = Pdf2Jpg(file_data)
+
         avatar = images.resize(avatar, 32, 32)
         # [END transform]
         # [START sign_handler_2]

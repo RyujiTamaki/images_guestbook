@@ -6,3 +6,6 @@ handlers:
 
 - url: .*
   script: main.app
+
+includes:
+- secret.yaml
